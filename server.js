@@ -164,14 +164,24 @@ const SUBWAY_GEOMETRIES = {
     ]
 };
 
+function getTorontoSecs() {
+    try {
+        const now = new Date();
+        const torontoStr = now.toLocaleString("en-US", { timeZone: "America/Toronto" });
+        const d = new Date(torontoStr);
+        return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+    } catch (e) {
+        const now = new Date();
+        return now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    }
+}
+
 function generateAnticipatedSubways() {
     const subways = [];
-    const now = new Date();
-    // Minutes elapsed today
-    const nowSecs = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    const nowSecs = getTorontoSecs();
     
-    // Operating hours 5:30 AM (19800s) to 1:30 AM next day
-    if (nowSecs < 19800 && nowSecs > 5400) return subways;
+    // Operating hours 5:30 AM (19800s) to 1:30 AM next day (5400s Toronto time)
+    if (nowSecs >= 5400 && nowSecs < 19800) return subways;
 
     const SUBWAY_CONFIGS = [
         { routeId: "1", durationSecs: 4200, headwaySecs: 210, stations: SUBWAY_GEOMETRIES["1"] },

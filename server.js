@@ -1,13 +1,20 @@
 const express = require('express');
 const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const cors = require('cors');
 const AdmZip = require('adm-zip');
-
 const compression = require('compression');
+
+// Use native fetch (built into Node 18+) with fallback to node-fetch if needed
+const fetchFn = (typeof globalThis.fetch === 'function') 
+    ? globalThis.fetch 
+    : (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// TTC GTFS Data URLs
+const GTFS_REALTIME_URL = 'https://bustime.ttc.ca/gtfsrt/vehicles';
+const GTFS_STATIC_URL = 'https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/7795b45e-e65a-4465-81fc-c36b9dfff169/resource/cfb6b2b8-6191-41e3-bda1-b175c51148cb/download/TTC%20Routes%20and%20Schedules%20Data.zip';
 
 // Enable Gzip/Brotli response compression for ultra-fast network transfers
 app.use(compression());
@@ -235,7 +242,7 @@ function generateAnticipatedSubways() {
 // --- WORKER 2: REAL-TIME DATA (Runs every 10 seconds) ---
 async function updateRealtimeData() {
     try {
-        const response = await fetch(GTFS_REALTIME_URL, {
+        const response = await fetchFn(GTFS_REALTIME_URL, {
             headers: { 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
             }
@@ -259,7 +266,7 @@ async function updateRealtimeData() {
                     latitude: vehicleObj.position.latitude,
                     longitude: vehicleObj.position.longitude,
                     bearing: vehicleObj.position.bearing || 0,
-                    speed: vehicleObj.position.speed || 0, // speed in m/s (can convert to km/h in UI)
+                    speed: vehicleObj.position.speed || 0,
                     occupancyStatus: formatEnum(vehicleObj.occupancyStatus, OCCUPANCY_MAP),
                     currentStatus: formatEnum(vehicleObj.currentStatus, STATUS_MAP),
                     stopId: vehicleObj.stopId || null,
@@ -273,18 +280,20 @@ async function updateRealtimeData() {
         const anticipatedSubways = generateAnticipatedSubways();
         const buses = [...surfaceBuses, ...anticipatedSubways];
 
-        // Stale Detection Logic
         const currentDataString = JSON.stringify(buses);
-        if (currentDataString === cache.lastDataString && buses.length > 0) {
+        if (currentDataString === cache.lastDataString) {
             cache.staleCount++;
         } else {
             cache.staleCount = 0;
+        }
+
+        if (buses.length > 0) {
             cache.buses = buses;
             cache.lastDataString = currentDataString;
         }
 
     } catch (error) {
-        console.error("[Realtime Worker] Fetch failed:", error.message);
+        console.error("[Realtime Worker] Fetch failed:", error.stack || error.message);
         cache.staleCount++;
     }
 }

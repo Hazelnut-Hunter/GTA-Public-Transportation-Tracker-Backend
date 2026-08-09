@@ -4,13 +4,13 @@ const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch
 const cors = require('cors');
 const AdmZip = require('adm-zip');
 
+const compression = require('compression');
+
 const app = express();
 const port = process.env.PORT || 3000;
 
-// TTC GTFS Data URLs
-const GTFS_REALTIME_URL = 'https://bustime.ttc.ca/gtfsrt/vehicles';
-const GTFS_STATIC_URL = 'https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/7795b45e-e65a-4465-81fc-c36b9dfff169/resource/cfb6b2b8-6191-41e3-bda1-b175c51148cb/download/TTC%20Routes%20and%20Schedules%20Data.zip';
-
+// Enable Gzip/Brotli response compression for ultra-fast network transfers
+app.use(compression());
 app.use(cors());
 
 // --- GLOBAL CACHE ---
@@ -314,11 +314,13 @@ app.get('/', (req, res) => {
 // 1. Get Real-time TTC Vehicles
 app.get('/buses', (req, res) => {
     res.set('X-Stale-Count', cache.staleCount);
+    res.set('Cache-Control', 'public, max-age=3');
     res.json(cache.buses);
 });
 
 // 2. Get Static Route List
 app.get('/routes', (req, res) => {
+    res.set('Cache-Control', 'public, max-age=86400');
     res.json(cache.routes);
 });
 

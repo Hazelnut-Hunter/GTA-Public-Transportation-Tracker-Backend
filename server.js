@@ -12,9 +12,12 @@ const fetchFn = (typeof globalThis.fetch === 'function')
 const app = express();
 const port = process.env.PORT || 3000;
 
-// TTC GTFS Data URLs
+// Data Feed URLs
 const GTFS_REALTIME_URL = 'https://bustime.ttc.ca/gtfsrt/vehicles';
 const GTFS_STATIC_URL = 'https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/7795b45e-e65a-4465-81fc-c36b9dfff169/resource/cfb6b2b8-6191-41e3-bda1-b175c51148cb/download/TTC%20Routes%20and%20Schedules%20Data.zip';
+
+const METROLINX_REALTIME_URL = process.env.METROLINX_REALTIME_URL || 'https://api.openmetrolinx.com/OpenDataAPI/api/v1/Gtfs/Feed/VehiclePosition';
+const METROLINX_API_KEY = process.env.METROLINX_API_KEY || '';
 
 // Enable Gzip/Brotli response compression for ultra-fast network transfers
 app.use(compression());
@@ -22,26 +25,63 @@ app.use(cors());
 
 // --- GLOBAL CACHE ---
 let cache = {
-    buses: [],          // Real-time TTC vehicle locations
-    routes: {},         // Static route info mapping routeId -> route details
-    staleCount: 0,      // Tracks how many times real-time data was identical
-    lastDataString: ""  // JSON string of vehicle data for comparison
+    buses: [],          // Combined real-time & rail vehicle locations (TTC, GO Transit, UP Express)
+    routes: {},         // Static route details
+    staleCount: 0,      // Tracks data freshness
+    lastDataString: ""  // Hash comparison for cache updates
 };
 
-// Default fallback route colors for subway & major lines if missing in routes.txt
+// Default route color schemes
 const DEFAULT_ROUTE_COLORS = {
-    "1": { color: "D5C82B", textColor: "000000", type: "1" }, // Line 1 Yonge-University (Yellow)
-    "2": { color: "00994C", textColor: "FFFFFF", type: "1" }, // Line 2 Bloor-Danforth (Green)
-    "3": { color: "0080C0", textColor: "FFFFFF", type: "1" }, // Line 3 Scarborough (Blue)
-    "4": { color: "B30086", textColor: "FFFFFF", type: "1" }  // Line 4 Sheppard (Purple)
+    // TTC Subway Lines
+    "1": { color: "D5C82B", textColor: "000000", type: "1", agency: "ttc" }, // Line 1 Yonge-University
+    "2": { color: "00994C", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 2 Bloor-Danforth
+    "4": { color: "B30086", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 4 Sheppard
+    "5": { color: "E65100", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 5 Eglinton LRT
+    "6": { color: "5D4037", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 6 Finch West LRT
+
+    // GO Transit Corridors
+    "LW": { color: "00853D", textColor: "FFFFFF", type: "2", agency: "go" }, // Lakeshore West
+    "LE": { color: "FFC72C", textColor: "000000", type: "2", agency: "go" }, // Lakeshore East
+    "MI": { color: "E75D2A", textColor: "FFFFFF", type: "2", agency: "go" }, // Milton
+    "KI": { color: "00A3E0", textColor: "FFFFFF", type: "2", agency: "go" }, // Kitchener
+    "BR": { color: "005DAA", textColor: "FFFFFF", type: "2", agency: "go" }, // Barrie
+    "ST": { color: "790022", textColor: "FFFFFF", type: "2", agency: "go" }, // Stouffville
+    "RH": { color: "009639", textColor: "FFFFFF", type: "2", agency: "go" }, // Richmond Hill
+
+    // UP Express
+    "UP": { color: "004B49", textColor: "D4AF37", type: "2", agency: "up" }  // UP Express
 };
 
-// --- WORKER 1: STATIC DATA (Runs on startup, refreshes every 24 hours) ---
+// Enums
+const OCCUPANCY_MAP = {
+    0: 'EMPTY',
+    1: 'MANY_SEATS_AVAILABLE',
+    2: 'FEW_SEATS_AVAILABLE',
+    3: 'STANDING_ROOM_ONLY',
+    4: 'CRUSHED_STANDING_ROOM_ONLY',
+    5: 'FULL',
+    6: 'NOT_ACCEPTING_PASSENGERS'
+};
+
+const STATUS_MAP = {
+    0: 'INCOMING_AT',
+    1: 'STOPPED_AT',
+    2: 'IN_TRANSIT_TO'
+};
+
+function formatEnum(val, mapObj) {
+    if (val === null || val === undefined) return null;
+    if (typeof val === 'number' && mapObj[val]) return mapObj[val];
+    return String(val);
+}
+
+// --- WORKER 1: STATIC DATA ---
 async function updateStaticData() {
     try {
-        console.log("[Static Worker] Downloading Static TTC GTFS Data (routes.txt)...");
-        const response = await fetch(GTFS_STATIC_URL, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) TTC-Tracker-Backend/1.0' }
+        console.log("[Static Worker] Downloading Static TTC & GTA GTFS Data (routes.txt)...");
+        const response = await fetchFn(GTFS_STATIC_URL, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) GTA-Tracker-Backend/2.0' }
         });
         if (!response.ok) throw new Error(`Failed to download static zip: ${response.statusText}`);
 
@@ -52,7 +92,6 @@ async function updateStaticData() {
         const lines = routeText.split('\n');
         if (lines.length < 2) return;
 
-        // Parse headers cleanly (removing BOM and extra quotes)
         const headers = lines[0].split(',').map(h => h.trim().replace(/^[\ufeff]+/, '').replace(/['"]+/g, ''));
         
         const idIndex = headers.indexOf('route_id');
@@ -64,11 +103,24 @@ async function updateStaticData() {
 
         let newRoutes = {};
 
+        // Preload default GO & UP Express routes
+        Object.keys(DEFAULT_ROUTE_COLORS).forEach(rId => {
+            const def = DEFAULT_ROUTE_COLORS[rId];
+            newRoutes[rId] = {
+                id: rId,
+                shortName: rId,
+                longName: rId === 'UP' ? 'UP Express' : `${rId} GO Line`,
+                type: def.type,
+                agency: def.agency,
+                color: `#${def.color}`,
+                textColor: `#${def.textColor}`
+            };
+        });
+
         for (let i = 1; i < lines.length; i++) {
             const currentLine = lines[i];
             if (!currentLine || currentLine.trim() === "") continue;
 
-            // Regex split respecting quoted fields
             const parts = currentLine.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
             
             if (parts[idIndex] !== undefined) {
@@ -80,7 +132,6 @@ async function updateStaticData() {
                 let routeColor = colorIndex !== -1 && parts[colorIndex] ? parts[colorIndex].replace(/"/g, '').trim() : "";
                 let routeTextColor = textColorIndex !== -1 && parts[textColorIndex] ? parts[textColorIndex].replace(/"/g, '').trim() : "";
 
-                // Apply default color scheme if missing
                 if (!routeColor && DEFAULT_ROUTE_COLORS[routeId]) {
                     routeColor = DEFAULT_ROUTE_COLORS[routeId].color;
                     routeTextColor = DEFAULT_ROUTE_COLORS[routeId].textColor;
@@ -93,7 +144,8 @@ async function updateStaticData() {
                     id: routeId,
                     shortName: shortName,
                     longName: longName,
-                    type: routeType, // 0 = Tram/Streetcar, 1 = Subway, 3 = Bus
+                    type: routeType,
+                    agency: DEFAULT_ROUTE_COLORS[routeId] ? DEFAULT_ROUTE_COLORS[routeId].agency : "ttc",
                     color: routeColor.startsWith("#") ? routeColor : `#${routeColor}`,
                     textColor: routeTextColor.startsWith("#") ? routeTextColor : `#${routeTextColor}`
                 };
@@ -101,73 +153,70 @@ async function updateStaticData() {
         }
 
         cache.routes = newRoutes;
-        console.log(`[Static Worker] Successfully loaded ${Object.keys(newRoutes).length} TTC routes.`);
+        console.log(`[Static Worker] Successfully loaded ${Object.keys(newRoutes).length} GTA routes.`);
 
     } catch (error) {
-        console.error("[Static Worker] Static Data Error:", error.message);
+        console.error("[Static Worker] Error loading static GTFS data:", error.message);
     }
 }
 
-const OCCUPANCY_MAP = {
-    0: "EMPTY",
-    1: "MANY SEATS AVAILABLE",
-    2: "FEW SEATS AVAILABLE",
-    3: "STANDING ROOM ONLY",
-    4: "CRUSHED STANDING ROOM ONLY",
-    5: "FULL",
-    6: "NOT ACCEPTING PASSENGERS"
-};
-
-const STATUS_MAP = {
-    0: "INCOMING AT",
-    1: "STOPPED AT",
-    2: "IN TRANSIT TO"
-};
-
-function formatEnum(val, mapObj) {
-    if (val === null || val === undefined) return null;
-    if (typeof val === 'number' && mapObj[val]) return mapObj[val];
-    return String(val);
-}
-
-// --- SUBWAY & LRT LINE GEOMETRIES FOR ANTICIPATED LIVE TRACKING (LINES 1 - 6) ---
-const SUBWAY_GEOMETRIES = {
+// --- RAIL GEOMETRIES (Subways + GO Trains + UP Express) ---
+const RAIL_GEOMETRIES = {
     "1": [
-        [43.7941, -79.5275], [43.7836, -79.5085], [43.7769, -79.5015], [43.7497, -79.4619],
-        [43.7454, -79.4522], [43.7344, -79.4501], [43.7258, -79.4475], [43.7088, -79.4407],
-        [43.6987, -79.4358], [43.6841, -79.4184], [43.6743, -79.4072], [43.6681, -79.4005],
-        [43.6681, -79.3997], [43.6672, -79.3934], [43.6601, -79.3905], [43.6548, -79.3883],
-        [43.6508, -79.3867], [43.6477, -79.3849], [43.6454, -79.3806], [43.6491, -79.3777],
-        [43.6525, -79.3793], [43.6563, -79.3810], [43.6599, -79.3831], [43.6648, -79.3842],
-        [43.6702, -79.3868], [43.6774, -79.3888], [43.6865, -79.3906], [43.7001, -79.3986],
-        [43.7061, -79.3987], [43.7250, -79.4021], [43.7303, -79.4057], [43.7441, -79.4068],
-        [43.7615, -79.4109], [43.7679, -79.4128], [43.7798, -79.4158]
+        [43.7798, -79.4158], [43.7679, -79.4128], [43.7615, -79.4109], [43.7441, -79.4068],
+        [43.7303, -79.4057], [43.7250, -79.4021], [43.7061, -79.3987], [43.7001, -79.3986],
+        [43.6865, -79.3906], [43.6774, -79.3888], [43.6702, -79.3868], [43.6648, -79.3842],
+        [43.6599, -79.3831], [43.6563, -79.3810], [43.6525, -79.3793], [43.6491, -79.3777],
+        [43.6454, -79.3806], [43.6477, -79.3849], [43.6508, -79.3867], [43.6551, -79.3884],
+        [43.6595, -79.3904], [43.6672, -79.4038], [43.6702, -79.4111], [43.6854, -79.4312],
+        [43.6987, -79.4358], [43.7250, -79.4524], [43.7497, -79.4619], [43.7512, -79.4752],
+        [43.7524, -79.4878], [43.7538, -79.5002], [43.7551, -79.5135], [43.7564, -79.5268],
+        [43.7578, -79.5398], [43.7591, -79.5524], [43.7605, -79.5651]
     ],
     "2": [
         [43.6375, -79.5356], [43.6453, -79.5244], [43.6482, -79.5113], [43.6498, -79.4944],
-        [43.6499, -79.4842], [43.6517, -79.4757], [43.6538, -79.4668], [43.6555, -79.4597],
-        [43.6569, -79.4528], [43.6590, -79.4428], [43.6602, -79.4357], [43.6624, -79.4262],
-        [43.6641, -79.4184], [43.6659, -79.4111], [43.6672, -79.4038], [43.6681, -79.3997],
-        [43.6702, -79.3900], [43.6702, -79.3868], [43.6722, -79.3764], [43.6737, -79.3687],
-        [43.6767, -79.3584], [43.6782, -79.3523], [43.6798, -79.3450], [43.6811, -79.3378],
-        [43.6826, -79.3303], [43.6843, -79.3232], [43.6865, -79.3129], [43.6890, -79.3017],
+        [43.6517, -79.4757], [43.6538, -79.4668], [43.6569, -79.4528], [43.6602, -79.4357],
+        [43.6641, -79.4184], [43.6672, -79.4038], [43.6702, -79.3868], [43.6737, -79.3687],
+        [43.6767, -79.3584], [43.6798, -79.3450], [43.6843, -79.3232], [43.6890, -79.3017],
         [43.6948, -79.2887], [43.7114, -79.2794], [43.7323, -79.2637]
     ],
     "4": [
         [43.7615, -79.4109], [43.7669, -79.3867], [43.7692, -79.3763], [43.7713, -79.3653], [43.7754, -79.3464]
     ],
-    "5": [
-        [43.6876, -79.4862], [43.6899, -79.4751], [43.6922, -79.4654], [43.6945, -79.4552],
-        [43.6971, -79.4449], [43.6987, -79.4358], [43.7011, -79.4261], [43.7032, -79.4168],
-        [43.7047, -79.4082], [43.7061, -79.3987], [43.7088, -79.3888], [43.7114, -79.3789],
-        [43.7139, -79.3689], [43.7169, -79.3582], [43.7214, -79.3402], [43.7248, -79.3288],
-        [43.7265, -79.3175], [43.7281, -79.3061], [43.7299, -79.2934], [43.7323, -79.2637]
+    "LW": [
+        [43.2662, -79.8724], [43.3132, -79.8087], [43.3244, -79.7981], [43.3406, -79.7618],
+        [43.3931, -79.6841], [43.5134, -79.6331], [43.5558, -79.5857], [43.5912, -79.5447],
+        [43.6163, -79.4789], [43.6354, -79.4215], [43.6454, -79.3806]
     ],
-    "6": [
-        [43.7497, -79.4619], [43.7512, -79.4752], [43.7524, -79.4878], [43.7538, -79.5002],
-        [43.7551, -79.5135], [43.7564, -79.5268], [43.7578, -79.5398], [43.7591, -79.5524],
-        [43.7605, -79.5651], [43.7584, -79.5782], [43.7532, -79.5876], [43.7468, -79.5934],
-        [43.7412, -79.5978], [43.7356, -79.6012]
+    "LE": [
+        [43.6454, -79.3806], [43.6681, -79.3005], [43.7153, -79.2524], [43.7461, -79.2234],
+        [43.7554, -79.1985], [43.7801, -79.1312], [43.8312, -79.0851], [43.8504, -79.0152],
+        [43.8682, -78.9385], [43.8912, -78.8574]
+    ],
+    "MI": [
+        [43.5241, -79.9012], [43.5824, -79.7562], [43.5781, -79.7153], [43.5812, -79.6582],
+        [43.5862, -79.6051], [43.6051, -79.5582], [43.6375, -79.5356], [43.6454, -79.3806]
+    ],
+    "KI": [
+        [43.4552, -80.4931], [43.5448, -80.2482], [43.6321, -80.0412], [43.6558, -79.9241],
+        [43.6821, -79.7912], [43.6872, -79.7621], [43.7051, -79.6882], [43.7082, -79.6382],
+        [43.7052, -79.5851], [43.6555, -79.4597], [43.6569, -79.4528], [43.6454, -79.3806]
+    ],
+    "BR": [
+        [44.3752, -79.6882], [44.3312, -79.6451], [44.1321, -79.5682], [44.0552, -79.4582],
+        [43.9982, -79.4621], [43.9312, -79.4652], [43.8752, -79.4712], [43.8241, -79.4821],
+        [43.7497, -79.4619], [43.6454, -79.3806]
+    ],
+    "ST": [
+        [44.0512, -79.2452], [43.9712, -79.2552], [43.8912, -79.2621], [43.8552, -79.2652],
+        [43.8182, -79.2682], [43.7782, -79.2712], [43.7312, -79.2752], [43.6454, -79.3806]
+    ],
+    "RH": [
+        [43.9212, -79.4182], [43.8712, -79.4152], [43.8382, -79.4121], [43.8052, -79.3952],
+        [43.7652, -79.3652], [43.6454, -79.3806]
+    ],
+    "UP": [
+        [43.6454, -79.3806], [43.6569, -79.4528], [43.7052, -79.5152], [43.6841, -79.6152]
     ]
 };
 
@@ -183,22 +232,33 @@ function getTorontoSecs() {
     }
 }
 
-function generateAnticipatedSubways() {
-    const subways = [];
+function generateAnticipatedRail() {
+    const railVehicles = [];
     const nowSecs = getTorontoSecs();
-    
-    // Operating hours 5:30 AM (19800s) to 1:30 AM next day (5400s Toronto time)
-    if (nowSecs >= 5400 && nowSecs < 19800) return subways;
 
-    const SUBWAY_CONFIGS = [
-        { routeId: "1", durationSecs: 4200, headwaySecs: 210, stations: SUBWAY_GEOMETRIES["1"] },
-        { routeId: "2", durationSecs: 3000, headwaySecs: 240, stations: SUBWAY_GEOMETRIES["2"] },
-        { routeId: "4", durationSecs: 600,  headwaySecs: 330, stations: SUBWAY_GEOMETRIES["4"] },
-        { routeId: "5", durationSecs: 2400, headwaySecs: 300, stations: SUBWAY_GEOMETRIES["5"] },
-        { routeId: "6", durationSecs: 1800, headwaySecs: 360, stations: SUBWAY_GEOMETRIES["6"] }
+    // 5:30 AM to 1:30 AM
+    if (nowSecs >= 5400 && nowSecs < 19800) return railVehicles;
+
+    const RAIL_CONFIGS = [
+        // TTC Subways
+        { routeId: "1", agency: "ttc", type: "subway", durationSecs: 4200, headwaySecs: 210, stations: RAIL_GEOMETRIES["1"] },
+        { routeId: "2", agency: "ttc", type: "subway", durationSecs: 3000, headwaySecs: 240, stations: RAIL_GEOMETRIES["2"] },
+        { routeId: "4", agency: "ttc", type: "subway", durationSecs: 600,  headwaySecs: 330, stations: RAIL_GEOMETRIES["4"] },
+        
+        // GO Transit Corridors
+        { routeId: "LW", agency: "go", type: "train", durationSecs: 4500, headwaySecs: 900, stations: RAIL_GEOMETRIES["LW"] },
+        { routeId: "LE", agency: "go", type: "train", durationSecs: 4200, headwaySecs: 900, stations: RAIL_GEOMETRIES["LE"] },
+        { routeId: "MI", agency: "go", type: "train", durationSecs: 3600, headwaySecs: 1800, stations: RAIL_GEOMETRIES["MI"] },
+        { routeId: "KI", agency: "go", type: "train", durationSecs: 5400, headwaySecs: 1800, stations: RAIL_GEOMETRIES["KI"] },
+        { routeId: "BR", agency: "go", type: "train", durationSecs: 4800, headwaySecs: 1800, stations: RAIL_GEOMETRIES["BR"] },
+        { routeId: "ST", agency: "go", type: "train", durationSecs: 3900, headwaySecs: 1800, stations: RAIL_GEOMETRIES["ST"] },
+        { routeId: "RH", agency: "go", type: "train", durationSecs: 3300, headwaySecs: 1800, stations: RAIL_GEOMETRIES["RH"] },
+
+        // UP Express
+        { routeId: "UP", agency: "up", type: "train", durationSecs: 1500, headwaySecs: 900, stations: RAIL_GEOMETRIES["UP"] }
     ];
 
-    SUBWAY_CONFIGS.forEach(cfg => {
+    RAIL_CONFIGS.forEach(cfg => {
         const numTrains = Math.floor(cfg.durationSecs / cfg.headwaySecs);
         const totalSegs = cfg.stations.length - 1;
         const segLength = 1 / totalSegs;
@@ -219,14 +279,16 @@ function generateAnticipatedSubways() {
                 
                 let bearing = Math.round((Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / Math.PI + 360) % 360);
 
-                subways.push({
-                    id: `SUBWAY-${cfg.routeId}-${direction}-${i}`,
+                railVehicles.push({
+                    id: `${cfg.agency.toUpperCase()}-${cfg.routeId}-${direction}-${i}`,
+                    agency: cfg.agency,
+                    type: cfg.type,
                     routeId: cfg.routeId,
                     directionId: direction,
                     latitude: lat,
                     longitude: lng,
                     bearing: bearing,
-                    speed: 12.5, // ~45 km/h
+                    speed: cfg.agency === 'up' ? 22 : (cfg.agency === 'go' ? 25 : 12.5),
                     occupancyStatus: "FEW SEATS AVAILABLE",
                     currentStatus: "IN TRANSIT TO",
                     isAnticipated: true,
@@ -236,15 +298,62 @@ function generateAnticipatedSubways() {
         });
     });
 
-    return subways;
+    return railVehicles;
+}
+
+// Fetch Metrolinx GTFS-RT Protobuf Vehicles (GO Transit + UP Express)
+async function fetchMetrolinxVehicles() {
+    if (!METROLINX_API_KEY) return [];
+    try {
+        const response = await fetchFn(`${METROLINX_REALTIME_URL}?key=${METROLINX_API_KEY}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) GTA-Transit-Tracker/2.0' }
+        });
+        if (!response.ok) return [];
+
+        const buffer = await response.arrayBuffer();
+        const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
+
+        return feed.entity.map(entity => {
+            if (entity.vehicle && entity.vehicle.position) {
+                const v = entity.vehicle;
+                const vId = (v.vehicle && v.vehicle.id) ? v.vehicle.id : entity.id;
+                const routeId = v.trip ? (v.trip.routeId || 'GO') : 'GO';
+                const isUP = routeId.toUpperCase().includes('UP') || String(vId).startsWith('UP');
+                const agency = isUP ? 'up' : 'go';
+                const isTrain = isUP || ['LW','LE','MI','KI','BR','ST','RH','LKW','LKE'].some(r => routeId.toUpperCase().includes(r));
+
+                return {
+                    id: `${agency.toUpperCase()}-${vId}`,
+                    agency: agency,
+                    type: isTrain ? 'train' : 'bus',
+                    routeId: routeId,
+                    directionId: v.trip ? v.trip.directionId : null,
+                    latitude: v.position.latitude,
+                    longitude: v.position.longitude,
+                    bearing: v.position.bearing || 0,
+                    speed: v.position.speed || 0,
+                    occupancyStatus: formatEnum(v.occupancyStatus, OCCUPANCY_MAP),
+                    currentStatus: formatEnum(v.currentStatus, STATUS_MAP),
+                    stopId: v.stopId || null,
+                    timestamp: v.timestamp ? Number(v.timestamp) : Math.floor(Date.now() / 1000)
+                };
+            }
+            return null;
+        }).filter(v => v !== null);
+
+    } catch (error) {
+        console.warn("[Metrolinx Worker] Realtime fetch warning:", error.message);
+        return [];
+    }
 }
 
 // --- WORKER 2: REAL-TIME DATA (Runs every 10 seconds) ---
 async function updateRealtimeData() {
     try {
+        // 1. Fetch TTC Vehicles
         const response = await fetchFn(GTFS_REALTIME_URL, {
             headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) GTA-Transit-Tracker/2.0' 
             }
         });
 
@@ -258,9 +367,12 @@ async function updateRealtimeData() {
                 const vehicleObj = entity.vehicle;
                 const vehicleId = (vehicleObj.vehicle && vehicleObj.vehicle.id) ? vehicleObj.vehicle.id : entity.id;
                 const routeId = vehicleObj.trip ? vehicleObj.trip.routeId : 'Unknown';
-                
+                const isStreetcar = routeId.startsWith('5') || routeId.startsWith('301') || routeId.startsWith('304') || routeId.startsWith('306') || routeId.startsWith('310');
+
                 return {
-                    id: vehicleId,
+                    id: `TTC-${vehicleId}`,
+                    agency: 'ttc',
+                    type: isStreetcar ? 'streetcar' : 'bus',
                     routeId: routeId,
                     directionId: vehicleObj.trip ? vehicleObj.trip.directionId : null,
                     latitude: vehicleObj.position.latitude,
@@ -276,9 +388,14 @@ async function updateRealtimeData() {
             return null;
         }).filter(bus => bus !== null);
 
-        // Combine surface vehicles + anticipated subway locations
-        const anticipatedSubways = generateAnticipatedSubways();
-        const buses = [...surfaceBuses, ...anticipatedSubways];
+        // 2. Fetch Metrolinx (GO Transit & UP Express) live real-time vehicles
+        const metrolinxVehicles = await fetchMetrolinxVehicles();
+
+        // 3. Generate Anticipated Subways, GO Trains & UP Express
+        const anticipatedRail = generateAnticipatedRail();
+
+        // Combine all GTA active vehicles
+        const buses = [...surfaceBuses, ...metrolinxVehicles, ...anticipatedRail];
 
         const currentDataString = JSON.stringify(buses);
         if (currentDataString === cache.lastDataString) {
@@ -313,14 +430,14 @@ setTimeout(() => {
 app.get('/', (req, res) => {
     res.json({
         status: "online",
-        service: "TTC Vehicle Tracker Backend API",
+        service: "GTA Public Transportation Tracker Backend API",
         activeVehicles: cache.buses.length,
         loadedRoutes: Object.keys(cache.routes).length,
         staleCount: cache.staleCount
     });
 });
 
-// 1. Get Real-time TTC Vehicles
+// 1. Get Real-time GTA Vehicles
 app.get('/buses', (req, res) => {
     res.set('X-Stale-Count', cache.staleCount);
     res.set('Cache-Control', 'public, max-age=3');
@@ -329,10 +446,10 @@ app.get('/buses', (req, res) => {
 
 // 2. Get Static Route List
 app.get('/routes', (req, res) => {
-    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Cache-Control', 'public, max-age=3600');
     res.json(cache.routes);
 });
 
 app.listen(port, () => {
-    console.log(`TTC Tracker Backend running on port ${port}`);
+    console.log(`GTA Transit Tracker Backend running on port ${port}`);
 });

@@ -325,12 +325,14 @@ async function updateRealtimeData() {
         const buffer = await response.arrayBuffer();
         const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer));
 
+        const STREETCAR_ROUTES = new Set(['501', '503', '504', '505', '506', '507', '509', '510', '511', '512', '301', '304', '306', '310']);
+
         const surfaceBuses = feed.entity.map(entity => {
             if (entity.vehicle && entity.vehicle.position) {
                 const vehicleObj = entity.vehicle;
                 const vehicleId = (vehicleObj.vehicle && vehicleObj.vehicle.id) ? vehicleObj.vehicle.id : entity.id;
                 const routeId = vehicleObj.trip ? vehicleObj.trip.routeId : 'Unknown';
-                const isStreetcar = routeId.startsWith('5') || routeId.startsWith('301') || routeId.startsWith('304') || routeId.startsWith('306') || routeId.startsWith('310');
+                const isStreetcar = STREETCAR_ROUTES.has(String(routeId));
 
                 if (!isValidGtaLocation(vehicleObj.position.latitude, vehicleObj.position.longitude)) return null;
 

@@ -76,6 +76,15 @@ function formatEnum(val, mapObj) {
     return String(val);
 }
 
+function isValidGtaLocation(lat, lng) {
+    if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return false;
+    // Bounding Box for GTA Transit: Lat [43.15, 44.80], Lng [-80.60, -78.30]
+    if (lat < 43.15 || lat > 44.80 || lng < -80.60 || lng > -78.30) return false;
+    // Strict cutout for Lake Ontario south of Toronto waterfront
+    if (lat < 43.60 && lng > -79.48 && lng < -78.95) return false;
+    return true;
+}
+
 // --- WORKER 1: STATIC DATA ---
 async function updateStaticData() {
     try {
@@ -183,39 +192,39 @@ const RAIL_GEOMETRIES = {
     "4": [
         [43.7615, -79.4109], [43.7669, -79.3867], [43.7692, -79.3763], [43.7713, -79.3653], [43.7754, -79.3464]
     ],
-    "LW": [
+    "LW": [ // Lakeshore West Railway Line
         [43.2662, -79.8724], [43.3132, -79.8087], [43.3244, -79.7981], [43.3406, -79.7618],
         [43.3931, -79.6841], [43.5134, -79.6331], [43.5558, -79.5857], [43.5912, -79.5447],
         [43.6163, -79.4789], [43.6354, -79.4215], [43.6454, -79.3806]
     ],
-    "LE": [
+    "LE": [ // Lakeshore East Railway Line
         [43.6454, -79.3806], [43.6681, -79.3005], [43.7153, -79.2524], [43.7461, -79.2234],
         [43.7554, -79.1985], [43.7801, -79.1312], [43.8312, -79.0851], [43.8504, -79.0152],
         [43.8682, -78.9385], [43.8912, -78.8574]
     ],
-    "MI": [
+    "MI": [ // Milton Railway Line
         [43.5241, -79.9012], [43.5824, -79.7562], [43.5781, -79.7153], [43.5812, -79.6582],
         [43.5862, -79.6051], [43.6051, -79.5582], [43.6375, -79.5356], [43.6454, -79.3806]
     ],
-    "KI": [
+    "KI": [ // Kitchener Railway Line
         [43.4552, -80.4931], [43.5448, -80.2482], [43.6321, -80.0412], [43.6558, -79.9241],
         [43.6821, -79.7912], [43.6872, -79.7621], [43.7051, -79.6882], [43.7082, -79.6382],
         [43.7052, -79.5851], [43.6555, -79.4597], [43.6569, -79.4528], [43.6454, -79.3806]
     ],
-    "BR": [
+    "BR": [ // Barrie Railway Line
         [44.3752, -79.6882], [44.3312, -79.6451], [44.1321, -79.5682], [44.0552, -79.4582],
         [43.9982, -79.4621], [43.9312, -79.4652], [43.8752, -79.4712], [43.8241, -79.4821],
         [43.7497, -79.4619], [43.6454, -79.3806]
     ],
-    "ST": [
+    "ST": [ // Stouffville Railway Line
         [44.0512, -79.2452], [43.9712, -79.2552], [43.8912, -79.2621], [43.8552, -79.2652],
         [43.8182, -79.2682], [43.7782, -79.2712], [43.7312, -79.2752], [43.6454, -79.3806]
     ],
-    "RH": [
+    "RH": [ // Richmond Hill Railway Line
         [43.9212, -79.4182], [43.8712, -79.4152], [43.8382, -79.4121], [43.8052, -79.3952],
         [43.7652, -79.3652], [43.6454, -79.3806]
     ],
-    "UP": [
+    "UP": [ // UP Express (Union Station <-> Pearson T1 Railway Corridor)
         [43.6454, -79.3806], [43.6569, -79.4528], [43.7052, -79.5152], [43.6841, -79.6152]
     ]
 };
@@ -277,6 +286,8 @@ function generateAnticipatedRail() {
                 const lat = p1[0] + (p2[0] - p1[0]) * segProgress;
                 const lng = p1[1] + (p2[1] - p1[1]) * segProgress;
                 
+                if (!isValidGtaLocation(lat, lng)) return;
+
                 let bearing = Math.round((Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / Math.PI + 360) % 360);
 
                 railVehicles.push({
@@ -321,6 +332,8 @@ async function fetchMetrolinxVehicles() {
                 const isUP = routeId.toUpperCase().includes('UP') || String(vId).startsWith('UP');
                 const agency = isUP ? 'up' : 'go';
                 const isTrain = isUP || ['LW','LE','MI','KI','BR','ST','RH','LKW','LKE'].some(r => routeId.toUpperCase().includes(r));
+
+                if (!isValidGtaLocation(v.position.latitude, v.position.longitude)) return null;
 
                 return {
                     id: `${agency.toUpperCase()}-${vId}`,
@@ -368,6 +381,8 @@ async function updateRealtimeData() {
                 const vehicleId = (vehicleObj.vehicle && vehicleObj.vehicle.id) ? vehicleObj.vehicle.id : entity.id;
                 const routeId = vehicleObj.trip ? vehicleObj.trip.routeId : 'Unknown';
                 const isStreetcar = routeId.startsWith('5') || routeId.startsWith('301') || routeId.startsWith('304') || routeId.startsWith('306') || routeId.startsWith('310');
+
+                if (!isValidGtaLocation(vehicleObj.position.latitude, vehicleObj.position.longitude)) return null;
 
                 return {
                     id: `TTC-${vehicleId}`,

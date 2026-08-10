@@ -25,7 +25,7 @@ app.use(cors());
 
 // --- GLOBAL CACHE ---
 let cache = {
-    buses: [],          // Combined real-time & rail vehicle locations (TTC, GO Transit, UP Express)
+    buses: [],          // Combined real-time vehicle locations
     routes: {},         // Static route details
     staleCount: 0,      // Tracks data freshness
     lastDataString: ""  // Hash comparison for cache updates
@@ -41,28 +41,16 @@ const DEFAULT_ROUTE_COLORS = {
     "6": { color: "5D4037", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 6 Finch West LRT
 
     // GO Transit Train Corridors
-    "LW": { color: "00853D", textColor: "FFFFFF", type: "2", agency: "go" }, // Lakeshore West
-    "LE": { color: "FFC72C", textColor: "000000", type: "2", agency: "go" }, // Lakeshore East
-    "MI": { color: "E75D2A", textColor: "FFFFFF", type: "2", agency: "go" }, // Milton
-    "KI": { color: "00A3E0", textColor: "FFFFFF", type: "2", agency: "go" }, // Kitchener
-    "BR": { color: "005DAA", textColor: "FFFFFF", type: "2", agency: "go" }, // Barrie
-    "ST": { color: "790022", textColor: "FFFFFF", type: "2", agency: "go" }, // Stouffville
-    "RH": { color: "009639", textColor: "FFFFFF", type: "2", agency: "go" }, // Richmond Hill
-
-    // GO Transit Bus Routes
-    "40": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Hamilton - Pearson - Richmond Hill
-    "21": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Milton - Mississauga - Toronto
-    "16": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Hamilton Express
-    "25": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Waterloo - Mississauga
-    "31": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Guelph - Brampton - Toronto
-    "65": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Newmarket - Toronto
-    "96": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Oshawa - Finch
-    "12": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Niagara - Burlington
-    "47": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Hamilton - York U
-    "56": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Oshawa - Oakville
+    "LW": { color: "00853D", textColor: "FFFFFF", type: "2", agency: "go" },
+    "LE": { color: "FFC72C", textColor: "000000", type: "2", agency: "go" },
+    "MI": { color: "E75D2A", textColor: "FFFFFF", type: "2", agency: "go" },
+    "KI": { color: "00A3E0", textColor: "FFFFFF", type: "2", agency: "go" },
+    "BR": { color: "005DAA", textColor: "FFFFFF", type: "2", agency: "go" },
+    "ST": { color: "790022", textColor: "FFFFFF", type: "2", agency: "go" },
+    "RH": { color: "009639", textColor: "FFFFFF", type: "2", agency: "go" },
 
     // UP Express
-    "UP": { color: "004B49", textColor: "D4AF37", type: "2", agency: "up" }  // UP Express
+    "UP": { color: "004B49", textColor: "D4AF37", type: "2", agency: "up" }
 };
 
 // Enums
@@ -90,9 +78,7 @@ function formatEnum(val, mapObj) {
 
 function isValidGtaLocation(lat, lng) {
     if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return false;
-    // Bounding Box for GTA Transit: Lat [43.15, 44.80], Lng [-80.60, -78.30]
     if (lat < 43.15 || lat > 44.80 || lng < -80.60 || lng > -78.30) return false;
-    // Strict cutout for Lake Ontario south of Toronto waterfront
     if (lat < 43.60 && lng > -79.48 && lng < -78.95) return false;
     return true;
 }
@@ -100,7 +86,7 @@ function isValidGtaLocation(lat, lng) {
 // --- WORKER 1: STATIC DATA ---
 async function updateStaticData() {
     try {
-        console.log("[Static Worker] Downloading Static TTC & GTA GTFS Data (routes.txt)...");
+        console.log("[Static Worker] Downloading Static TTC GTFS Data (routes.txt)...");
         const response = await fetchFn(GTFS_STATIC_URL, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) GTA-Tracker-Backend/2.0' }
         });
@@ -130,7 +116,7 @@ async function updateStaticData() {
             newRoutes[rId] = {
                 id: rId,
                 shortName: rId,
-                longName: rId === 'UP' ? 'UP Express' : (def.type === '3' ? `GO Bus Route ${rId}` : `${rId} GO Train Line`),
+                longName: rId === 'UP' ? 'UP Express' : `${rId} GO Line`,
                 type: def.type,
                 agency: def.agency,
                 color: `#${def.color}`,
@@ -181,9 +167,8 @@ async function updateStaticData() {
     }
 }
 
-// --- HIGH-PRECISION CORRIDORS (Subways + GO Trains + GO Buses + UP Express) ---
+// --- SUBWAY CORRIDORS ---
 const TRANSIT_CORRIDORS = {
-    // TTC Subways
     "1": [
         [43.7798, -79.4158], [43.7679, -79.4128], [43.7615, -79.4109], [43.7441, -79.4068],
         [43.7303, -79.4057], [43.7250, -79.4021], [43.7061, -79.3987], [43.7001, -79.3986],
@@ -204,77 +189,6 @@ const TRANSIT_CORRIDORS = {
     ],
     "4": [
         [43.7615, -79.4109], [43.7669, -79.3867], [43.7692, -79.3763], [43.7713, -79.3653], [43.7754, -79.3464]
-    ],
-
-    // GO Train Corridors
-    "LW": [
-        [43.2662, -79.8724], [43.3132, -79.8087], [43.3244, -79.7981], [43.3406, -79.7618],
-        [43.3712, -79.7152], [43.3931, -79.6841], [43.5134, -79.6331], [43.5558, -79.5857],
-        [43.5912, -79.5447], [43.6163, -79.4789], [43.6354, -79.4215], [43.6454, -79.3806]
-    ],
-    "LE": [
-        [43.6454, -79.3806], [43.6681, -79.3005], [43.7153, -79.2524], [43.7461, -79.2234],
-        [43.7554, -79.1985], [43.7801, -79.1312], [43.8312, -79.0851], [43.8504, -79.0152],
-        [43.8682, -78.9385], [43.8682, -78.8874]
-    ],
-    "MI": [
-        [43.5241, -79.9012], [43.5824, -79.7562], [43.5781, -79.7153], [43.5812, -79.6582],
-        [43.5862, -79.6051], [43.6051, -79.5582], [43.6375, -79.5356], [43.6454, -79.3806]
-    ],
-    "KI": [
-        [43.4552, -80.4931], [43.5448, -80.2482], [43.6321, -80.0412], [43.6558, -79.9241],
-        [43.6821, -79.7912], [43.6872, -79.7621], [43.7051, -79.6882], [43.7082, -79.6382],
-        [43.7052, -79.5851], [43.7001, -79.5152], [43.6881, -79.4851], [43.6569, -79.4528],
-        [43.6454, -79.3806]
-    ],
-    "BR": [
-        [44.3752, -79.6882], [44.3312, -79.6451], [44.1321, -79.5682], [44.0812, -79.4452],
-        [44.0552, -79.4582], [43.9982, -79.4621], [43.9312, -79.4652], [43.8752, -79.4712],
-        [43.8241, -79.4821], [43.7497, -79.4619], [43.6454, -79.3806]
-    ],
-    "ST": [
-        [44.0512, -79.2412], [43.9712, -79.2452], [43.9112, -79.2552], [43.8912, -79.2601],
-        [43.8712, -79.2621], [43.8552, -79.2652], [43.8182, -79.2682], [43.7782, -79.2712],
-        [43.7312, -79.2752], [43.6454, -79.3806]
-    ],
-    "RH": [
-        [43.9212, -79.4182], [43.9012, -79.4162], [43.8712, -79.4152], [43.8382, -79.4121],
-        [43.8052, -79.3952], [43.7652, -79.3652], [43.6454, -79.3806]
-    ],
-
-    // UP Express
-    "UP": [
-        [43.6454, -79.3806], [43.6569, -79.4528], [43.6582, -79.4512], [43.6881, -79.4851],
-        [43.7001, -79.5152], [43.6841, -79.6152]
-    ],
-
-    // GO Bus Routes
-    "40": [
-        [43.2662, -79.8724], [43.3244, -79.7981], [43.3931, -79.6841], [43.5134, -79.6331],
-        [43.6841, -79.6152], [43.7798, -79.4158], [43.8382, -79.4121]
-    ],
-    "21": [
-        [43.5241, -79.9012], [43.5824, -79.7562], [43.5931, -79.6421], [43.5862, -79.6051],
-        [43.6375, -79.5356], [43.6454, -79.3806]
-    ],
-    "16": [
-        [43.2662, -79.8724], [43.3244, -79.7981], [43.3931, -79.6841], [43.5558, -79.5857],
-        [43.6354, -79.4215], [43.6454, -79.3806]
-    ],
-    "25": [
-        [43.4721, -80.5401], [43.5448, -80.2482], [43.6821, -79.7912], [43.5931, -79.6421]
-    ],
-    "31": [
-        [43.5448, -80.2482], [43.6558, -79.9241], [43.6872, -79.7621], [43.7303, -79.4057],
-        [43.6454, -79.3806]
-    ],
-    "65": [
-        [44.0552, -79.4582], [43.9982, -79.4621], [43.8712, -79.4152], [43.7798, -79.4158],
-        [43.6454, -79.3806]
-    ],
-    "96": [
-        [43.8682, -78.8874], [43.8504, -79.0152], [43.8312, -79.0851], [43.7801, -79.1312],
-        [43.7798, -79.4158]
     ]
 };
 
@@ -290,42 +204,20 @@ function getTorontoSecs() {
     }
 }
 
-function generateAnticipatedVehicles() {
+function generateAnticipatedSubways() {
     const vehicles = [];
     const nowSecs = getTorontoSecs();
 
-    // Operating hours 5:30 AM to 1:30 AM
+    // 5:30 AM to 1:30 AM
     if (nowSecs >= 5400 && nowSecs < 19800) return vehicles;
 
-    const VEHICLE_CONFIGS = [
-        // TTC Subways
+    const SUBWAY_CONFIGS = [
         { routeId: "1", agency: "ttc", type: "subway", durationSecs: 4200, headwaySecs: 210, stations: TRANSIT_CORRIDORS["1"] },
         { routeId: "2", agency: "ttc", type: "subway", durationSecs: 3000, headwaySecs: 240, stations: TRANSIT_CORRIDORS["2"] },
-        { routeId: "4", agency: "ttc", type: "subway", durationSecs: 600,  headwaySecs: 330, stations: TRANSIT_CORRIDORS["4"] },
-        
-        // GO Transit Trains
-        { routeId: "LW", agency: "go", type: "train", durationSecs: 4500, headwaySecs: 900, stations: TRANSIT_CORRIDORS["LW"] },
-        { routeId: "LE", agency: "go", type: "train", durationSecs: 4200, headwaySecs: 900, stations: TRANSIT_CORRIDORS["LE"] },
-        { routeId: "MI", agency: "go", type: "train", durationSecs: 3600, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["MI"] },
-        { routeId: "KI", agency: "go", type: "train", durationSecs: 5400, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["KI"] },
-        { routeId: "BR", agency: "go", type: "train", durationSecs: 4800, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["BR"] },
-        { routeId: "ST", agency: "go", type: "train", durationSecs: 3900, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["ST"] },
-        { routeId: "RH", agency: "go", type: "train", durationSecs: 3300, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["RH"] },
-
-        // GO Transit Buses
-        { routeId: "40", agency: "go", type: "bus", durationSecs: 3600, headwaySecs: 1200, stations: TRANSIT_CORRIDORS["40"] },
-        { routeId: "21", agency: "go", type: "bus", durationSecs: 3000, headwaySecs: 1200, stations: TRANSIT_CORRIDORS["21"] },
-        { routeId: "16", agency: "go", type: "bus", durationSecs: 2700, headwaySecs: 1200, stations: TRANSIT_CORRIDORS["16"] },
-        { routeId: "25", agency: "go", type: "bus", durationSecs: 4800, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["25"] },
-        { routeId: "31", agency: "go", type: "bus", durationSecs: 3600, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["31"] },
-        { routeId: "65", agency: "go", type: "bus", durationSecs: 3000, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["65"] },
-        { routeId: "96", agency: "go", type: "bus", durationSecs: 3300, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["96"] },
-
-        // UP Express Train
-        { routeId: "UP", agency: "up", type: "train", durationSecs: 1500, headwaySecs: 900, stations: TRANSIT_CORRIDORS["UP"] }
+        { routeId: "4", agency: "ttc", type: "subway", durationSecs: 600,  headwaySecs: 330, stations: TRANSIT_CORRIDORS["4"] }
     ];
 
-    VEHICLE_CONFIGS.forEach(cfg => {
+    SUBWAY_CONFIGS.forEach(cfg => {
         const numVehicles = Math.floor(cfg.durationSecs / cfg.headwaySecs);
         const totalSegs = cfg.stations.length - 1;
         const segLength = 1 / totalSegs;
@@ -349,15 +241,15 @@ function generateAnticipatedVehicles() {
                 let bearing = Math.round((Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / Math.PI + 360) % 360);
 
                 vehicles.push({
-                    id: `${cfg.agency.toUpperCase()}-${cfg.routeId}-${direction}-${i}`,
-                    agency: cfg.agency,
-                    type: cfg.type,
+                    id: `TTC-${cfg.routeId}-${direction}-${i}`,
+                    agency: "ttc",
+                    type: "subway",
                     routeId: cfg.routeId,
                     directionId: direction,
                     latitude: lat,
                     longitude: lng,
                     bearing: bearing,
-                    speed: cfg.agency === 'up' ? 22 : (cfg.agency === 'go' ? (cfg.type === 'train' ? 25 : 18) : 12.5),
+                    speed: 12.5,
                     occupancyStatus: "FEW SEATS AVAILABLE",
                     currentStatus: "IN TRANSIT TO",
                     isAnticipated: true,
@@ -370,7 +262,7 @@ function generateAnticipatedVehicles() {
     return vehicles;
 }
 
-// Fetch Metrolinx GTFS-RT Protobuf Vehicles (if API key present)
+// Fetch Metrolinx GTFS-RT Protobuf Vehicles (When METROLINX_API_KEY is configured)
 async function fetchMetrolinxVehicles() {
     if (!METROLINX_API_KEY) return [];
     try {
@@ -421,7 +313,7 @@ async function fetchMetrolinxVehicles() {
 // --- WORKER 2: REAL-TIME DATA (Runs every 10 seconds) ---
 async function updateRealtimeData() {
     try {
-        // 1. Fetch TTC Vehicles
+        // 1. Fetch TTC Real-Time Vehicles
         const response = await fetchFn(GTFS_REALTIME_URL, {
             headers: { 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) GTA-Transit-Tracker/2.0' 
@@ -461,14 +353,14 @@ async function updateRealtimeData() {
             return null;
         }).filter(bus => bus !== null);
 
-        // 2. Fetch Metrolinx (GO Transit & UP Express) live real-time vehicles
+        // 2. Fetch Metrolinx (GO Transit & UP Express) live real-time vehicles (if API key is present)
         const metrolinxVehicles = await fetchMetrolinxVehicles();
 
-        // 3. Generate Anticipated Subways, GO Trains, GO Buses & UP Express
-        const anticipatedVehicles = generateAnticipatedVehicles();
+        // 3. Generate Anticipated Subways
+        const anticipatedSubways = generateAnticipatedSubways();
 
-        // Combine all GTA active vehicles
-        const buses = [...surfaceBuses, ...metrolinxVehicles, ...anticipatedVehicles];
+        // Combine active vehicles
+        const buses = [...surfaceBuses, ...metrolinxVehicles, ...anticipatedSubways];
 
         const currentDataString = JSON.stringify(buses);
         if (currentDataString === cache.lastDataString) {

@@ -40,7 +40,7 @@ const DEFAULT_ROUTE_COLORS = {
     "5": { color: "E65100", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 5 Eglinton LRT
     "6": { color: "5D4037", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 6 Finch West LRT
 
-    // GO Transit Corridors
+    // GO Transit Train Corridors
     "LW": { color: "00853D", textColor: "FFFFFF", type: "2", agency: "go" }, // Lakeshore West
     "LE": { color: "FFC72C", textColor: "000000", type: "2", agency: "go" }, // Lakeshore East
     "MI": { color: "E75D2A", textColor: "FFFFFF", type: "2", agency: "go" }, // Milton
@@ -48,6 +48,18 @@ const DEFAULT_ROUTE_COLORS = {
     "BR": { color: "005DAA", textColor: "FFFFFF", type: "2", agency: "go" }, // Barrie
     "ST": { color: "790022", textColor: "FFFFFF", type: "2", agency: "go" }, // Stouffville
     "RH": { color: "009639", textColor: "FFFFFF", type: "2", agency: "go" }, // Richmond Hill
+
+    // GO Transit Bus Routes
+    "40": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Hamilton - Pearson - Richmond Hill
+    "21": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Milton - Mississauga - Toronto
+    "16": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Hamilton Express
+    "25": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Waterloo - Mississauga
+    "31": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Guelph - Brampton - Toronto
+    "65": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Newmarket - Toronto
+    "96": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Oshawa - Finch
+    "12": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Niagara - Burlington
+    "47": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Hamilton - York U
+    "56": { color: "00853D", textColor: "FFFFFF", type: "3", agency: "go" }, // Oshawa - Oakville
 
     // UP Express
     "UP": { color: "004B49", textColor: "D4AF37", type: "2", agency: "up" }  // UP Express
@@ -118,7 +130,7 @@ async function updateStaticData() {
             newRoutes[rId] = {
                 id: rId,
                 shortName: rId,
-                longName: rId === 'UP' ? 'UP Express' : `${rId} GO Line`,
+                longName: rId === 'UP' ? 'UP Express' : (def.type === '3' ? `GO Bus Route ${rId}` : `${rId} GO Train Line`),
                 type: def.type,
                 agency: def.agency,
                 color: `#${def.color}`,
@@ -169,8 +181,9 @@ async function updateStaticData() {
     }
 }
 
-// --- RAIL GEOMETRIES (Subways + GO Trains + UP Express) ---
-const RAIL_GEOMETRIES = {
+// --- HIGH-PRECISION CORRIDORS (Subways + GO Trains + GO Buses + UP Express) ---
+const TRANSIT_CORRIDORS = {
+    // TTC Subways
     "1": [
         [43.7798, -79.4158], [43.7679, -79.4128], [43.7615, -79.4109], [43.7441, -79.4068],
         [43.7303, -79.4057], [43.7250, -79.4021], [43.7061, -79.3987], [43.7001, -79.3986],
@@ -192,40 +205,76 @@ const RAIL_GEOMETRIES = {
     "4": [
         [43.7615, -79.4109], [43.7669, -79.3867], [43.7692, -79.3763], [43.7713, -79.3653], [43.7754, -79.3464]
     ],
-    "LW": [ // Lakeshore West Railway Line
+
+    // GO Train Corridors
+    "LW": [
         [43.2662, -79.8724], [43.3132, -79.8087], [43.3244, -79.7981], [43.3406, -79.7618],
-        [43.3931, -79.6841], [43.5134, -79.6331], [43.5558, -79.5857], [43.5912, -79.5447],
-        [43.6163, -79.4789], [43.6354, -79.4215], [43.6454, -79.3806]
+        [43.3712, -79.7152], [43.3931, -79.6841], [43.5134, -79.6331], [43.5558, -79.5857],
+        [43.5912, -79.5447], [43.6163, -79.4789], [43.6354, -79.4215], [43.6454, -79.3806]
     ],
-    "LE": [ // Lakeshore East Railway Line
+    "LE": [
         [43.6454, -79.3806], [43.6681, -79.3005], [43.7153, -79.2524], [43.7461, -79.2234],
         [43.7554, -79.1985], [43.7801, -79.1312], [43.8312, -79.0851], [43.8504, -79.0152],
-        [43.8682, -78.9385], [43.8912, -78.8574]
+        [43.8682, -78.9385], [43.8682, -78.8874]
     ],
-    "MI": [ // Milton Railway Line
+    "MI": [
         [43.5241, -79.9012], [43.5824, -79.7562], [43.5781, -79.7153], [43.5812, -79.6582],
         [43.5862, -79.6051], [43.6051, -79.5582], [43.6375, -79.5356], [43.6454, -79.3806]
     ],
-    "KI": [ // Kitchener Railway Line
+    "KI": [
         [43.4552, -80.4931], [43.5448, -80.2482], [43.6321, -80.0412], [43.6558, -79.9241],
         [43.6821, -79.7912], [43.6872, -79.7621], [43.7051, -79.6882], [43.7082, -79.6382],
-        [43.7052, -79.5851], [43.6555, -79.4597], [43.6569, -79.4528], [43.6454, -79.3806]
+        [43.7052, -79.5851], [43.7001, -79.5152], [43.6881, -79.4851], [43.6569, -79.4528],
+        [43.6454, -79.3806]
     ],
-    "BR": [ // Barrie Railway Line
-        [44.3752, -79.6882], [44.3312, -79.6451], [44.1321, -79.5682], [44.0552, -79.4582],
-        [43.9982, -79.4621], [43.9312, -79.4652], [43.8752, -79.4712], [43.8241, -79.4821],
-        [43.7497, -79.4619], [43.6454, -79.3806]
+    "BR": [
+        [44.3752, -79.6882], [44.3312, -79.6451], [44.1321, -79.5682], [44.0812, -79.4452],
+        [44.0552, -79.4582], [43.9982, -79.4621], [43.9312, -79.4652], [43.8752, -79.4712],
+        [43.8241, -79.4821], [43.7497, -79.4619], [43.6454, -79.3806]
     ],
-    "ST": [ // Stouffville Railway Line
-        [44.0512, -79.2452], [43.9712, -79.2552], [43.8912, -79.2621], [43.8552, -79.2652],
-        [43.8182, -79.2682], [43.7782, -79.2712], [43.7312, -79.2752], [43.6454, -79.3806]
+    "ST": [
+        [44.0512, -79.2412], [43.9712, -79.2452], [43.9112, -79.2552], [43.8912, -79.2601],
+        [43.8712, -79.2621], [43.8552, -79.2652], [43.8182, -79.2682], [43.7782, -79.2712],
+        [43.7312, -79.2752], [43.6454, -79.3806]
     ],
-    "RH": [ // Richmond Hill Railway Line
-        [43.9212, -79.4182], [43.8712, -79.4152], [43.8382, -79.4121], [43.8052, -79.3952],
-        [43.7652, -79.3652], [43.6454, -79.3806]
+    "RH": [
+        [43.9212, -79.4182], [43.9012, -79.4162], [43.8712, -79.4152], [43.8382, -79.4121],
+        [43.8052, -79.3952], [43.7652, -79.3652], [43.6454, -79.3806]
     ],
-    "UP": [ // UP Express (Union Station <-> Pearson T1 Railway Corridor)
-        [43.6454, -79.3806], [43.6569, -79.4528], [43.7052, -79.5152], [43.6841, -79.6152]
+
+    // UP Express
+    "UP": [
+        [43.6454, -79.3806], [43.6569, -79.4528], [43.6582, -79.4512], [43.6881, -79.4851],
+        [43.7001, -79.5152], [43.6841, -79.6152]
+    ],
+
+    // GO Bus Routes
+    "40": [
+        [43.2662, -79.8724], [43.3244, -79.7981], [43.3931, -79.6841], [43.5134, -79.6331],
+        [43.6841, -79.6152], [43.7798, -79.4158], [43.8382, -79.4121]
+    ],
+    "21": [
+        [43.5241, -79.9012], [43.5824, -79.7562], [43.5931, -79.6421], [43.5862, -79.6051],
+        [43.6375, -79.5356], [43.6454, -79.3806]
+    ],
+    "16": [
+        [43.2662, -79.8724], [43.3244, -79.7981], [43.3931, -79.6841], [43.5558, -79.5857],
+        [43.6354, -79.4215], [43.6454, -79.3806]
+    ],
+    "25": [
+        [43.4721, -80.5401], [43.5448, -80.2482], [43.6821, -79.7912], [43.5931, -79.6421]
+    ],
+    "31": [
+        [43.5448, -80.2482], [43.6558, -79.9241], [43.6872, -79.7621], [43.7303, -79.4057],
+        [43.6454, -79.3806]
+    ],
+    "65": [
+        [44.0552, -79.4582], [43.9982, -79.4621], [43.8712, -79.4152], [43.7798, -79.4158],
+        [43.6454, -79.3806]
+    ],
+    "96": [
+        [43.8682, -78.8874], [43.8504, -79.0152], [43.8312, -79.0851], [43.7801, -79.1312],
+        [43.7798, -79.4158]
     ]
 };
 
@@ -241,41 +290,50 @@ function getTorontoSecs() {
     }
 }
 
-function generateAnticipatedRail() {
-    const railVehicles = [];
+function generateAnticipatedVehicles() {
+    const vehicles = [];
     const nowSecs = getTorontoSecs();
 
-    // 5:30 AM to 1:30 AM
-    if (nowSecs >= 5400 && nowSecs < 19800) return railVehicles;
+    // Operating hours 5:30 AM to 1:30 AM
+    if (nowSecs >= 5400 && nowSecs < 19800) return vehicles;
 
-    const RAIL_CONFIGS = [
+    const VEHICLE_CONFIGS = [
         // TTC Subways
-        { routeId: "1", agency: "ttc", type: "subway", durationSecs: 4200, headwaySecs: 210, stations: RAIL_GEOMETRIES["1"] },
-        { routeId: "2", agency: "ttc", type: "subway", durationSecs: 3000, headwaySecs: 240, stations: RAIL_GEOMETRIES["2"] },
-        { routeId: "4", agency: "ttc", type: "subway", durationSecs: 600,  headwaySecs: 330, stations: RAIL_GEOMETRIES["4"] },
+        { routeId: "1", agency: "ttc", type: "subway", durationSecs: 4200, headwaySecs: 210, stations: TRANSIT_CORRIDORS["1"] },
+        { routeId: "2", agency: "ttc", type: "subway", durationSecs: 3000, headwaySecs: 240, stations: TRANSIT_CORRIDORS["2"] },
+        { routeId: "4", agency: "ttc", type: "subway", durationSecs: 600,  headwaySecs: 330, stations: TRANSIT_CORRIDORS["4"] },
         
-        // GO Transit Corridors
-        { routeId: "LW", agency: "go", type: "train", durationSecs: 4500, headwaySecs: 900, stations: RAIL_GEOMETRIES["LW"] },
-        { routeId: "LE", agency: "go", type: "train", durationSecs: 4200, headwaySecs: 900, stations: RAIL_GEOMETRIES["LE"] },
-        { routeId: "MI", agency: "go", type: "train", durationSecs: 3600, headwaySecs: 1800, stations: RAIL_GEOMETRIES["MI"] },
-        { routeId: "KI", agency: "go", type: "train", durationSecs: 5400, headwaySecs: 1800, stations: RAIL_GEOMETRIES["KI"] },
-        { routeId: "BR", agency: "go", type: "train", durationSecs: 4800, headwaySecs: 1800, stations: RAIL_GEOMETRIES["BR"] },
-        { routeId: "ST", agency: "go", type: "train", durationSecs: 3900, headwaySecs: 1800, stations: RAIL_GEOMETRIES["ST"] },
-        { routeId: "RH", agency: "go", type: "train", durationSecs: 3300, headwaySecs: 1800, stations: RAIL_GEOMETRIES["RH"] },
+        // GO Transit Trains
+        { routeId: "LW", agency: "go", type: "train", durationSecs: 4500, headwaySecs: 900, stations: TRANSIT_CORRIDORS["LW"] },
+        { routeId: "LE", agency: "go", type: "train", durationSecs: 4200, headwaySecs: 900, stations: TRANSIT_CORRIDORS["LE"] },
+        { routeId: "MI", agency: "go", type: "train", durationSecs: 3600, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["MI"] },
+        { routeId: "KI", agency: "go", type: "train", durationSecs: 5400, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["KI"] },
+        { routeId: "BR", agency: "go", type: "train", durationSecs: 4800, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["BR"] },
+        { routeId: "ST", agency: "go", type: "train", durationSecs: 3900, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["ST"] },
+        { routeId: "RH", agency: "go", type: "train", durationSecs: 3300, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["RH"] },
 
-        // UP Express
-        { routeId: "UP", agency: "up", type: "train", durationSecs: 1500, headwaySecs: 900, stations: RAIL_GEOMETRIES["UP"] }
+        // GO Transit Buses
+        { routeId: "40", agency: "go", type: "bus", durationSecs: 3600, headwaySecs: 1200, stations: TRANSIT_CORRIDORS["40"] },
+        { routeId: "21", agency: "go", type: "bus", durationSecs: 3000, headwaySecs: 1200, stations: TRANSIT_CORRIDORS["21"] },
+        { routeId: "16", agency: "go", type: "bus", durationSecs: 2700, headwaySecs: 1200, stations: TRANSIT_CORRIDORS["16"] },
+        { routeId: "25", agency: "go", type: "bus", durationSecs: 4800, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["25"] },
+        { routeId: "31", agency: "go", type: "bus", durationSecs: 3600, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["31"] },
+        { routeId: "65", agency: "go", type: "bus", durationSecs: 3000, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["65"] },
+        { routeId: "96", agency: "go", type: "bus", durationSecs: 3300, headwaySecs: 1800, stations: TRANSIT_CORRIDORS["96"] },
+
+        // UP Express Train
+        { routeId: "UP", agency: "up", type: "train", durationSecs: 1500, headwaySecs: 900, stations: TRANSIT_CORRIDORS["UP"] }
     ];
 
-    RAIL_CONFIGS.forEach(cfg => {
-        const numTrains = Math.floor(cfg.durationSecs / cfg.headwaySecs);
+    VEHICLE_CONFIGS.forEach(cfg => {
+        const numVehicles = Math.floor(cfg.durationSecs / cfg.headwaySecs);
         const totalSegs = cfg.stations.length - 1;
         const segLength = 1 / totalSegs;
 
         [0, 1].forEach(direction => {
             const stations = direction === 0 ? cfg.stations : [...cfg.stations].reverse();
 
-            for (let i = 0; i < numTrains; i++) {
+            for (let i = 0; i < numVehicles; i++) {
                 const progress = ((nowSecs + i * cfg.headwaySecs) % cfg.durationSecs) / cfg.durationSecs;
                 const index = Math.min(Math.floor(progress / segLength), totalSegs - 1);
                 const segProgress = (progress - index * segLength) / segLength;
@@ -290,7 +348,7 @@ function generateAnticipatedRail() {
 
                 let bearing = Math.round((Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / Math.PI + 360) % 360);
 
-                railVehicles.push({
+                vehicles.push({
                     id: `${cfg.agency.toUpperCase()}-${cfg.routeId}-${direction}-${i}`,
                     agency: cfg.agency,
                     type: cfg.type,
@@ -299,7 +357,7 @@ function generateAnticipatedRail() {
                     latitude: lat,
                     longitude: lng,
                     bearing: bearing,
-                    speed: cfg.agency === 'up' ? 22 : (cfg.agency === 'go' ? 25 : 12.5),
+                    speed: cfg.agency === 'up' ? 22 : (cfg.agency === 'go' ? (cfg.type === 'train' ? 25 : 18) : 12.5),
                     occupancyStatus: "FEW SEATS AVAILABLE",
                     currentStatus: "IN TRANSIT TO",
                     isAnticipated: true,
@@ -309,10 +367,10 @@ function generateAnticipatedRail() {
         });
     });
 
-    return railVehicles;
+    return vehicles;
 }
 
-// Fetch Metrolinx GTFS-RT Protobuf Vehicles (GO Transit + UP Express)
+// Fetch Metrolinx GTFS-RT Protobuf Vehicles (if API key present)
 async function fetchMetrolinxVehicles() {
     if (!METROLINX_API_KEY) return [];
     try {
@@ -406,11 +464,11 @@ async function updateRealtimeData() {
         // 2. Fetch Metrolinx (GO Transit & UP Express) live real-time vehicles
         const metrolinxVehicles = await fetchMetrolinxVehicles();
 
-        // 3. Generate Anticipated Subways, GO Trains & UP Express
-        const anticipatedRail = generateAnticipatedRail();
+        // 3. Generate Anticipated Subways, GO Trains, GO Buses & UP Express
+        const anticipatedVehicles = generateAnticipatedVehicles();
 
         // Combine all GTA active vehicles
-        const buses = [...surfaceBuses, ...metrolinxVehicles, ...anticipatedRail];
+        const buses = [...surfaceBuses, ...metrolinxVehicles, ...anticipatedVehicles];
 
         const currentDataString = JSON.stringify(buses);
         if (currentDataString === cache.lastDataString) {

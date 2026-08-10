@@ -189,6 +189,21 @@ const TRANSIT_CORRIDORS = {
     ],
     "4": [
         [43.7615, -79.4109], [43.7669, -79.3867], [43.7692, -79.3763], [43.7713, -79.3653], [43.7754, -79.3464]
+    ],
+    "5": [
+        [43.6888, -79.4862], [43.6898, -79.4712], [43.6912, -79.4588], [43.6932, -79.4485],
+        [43.6958, -79.4382], [43.6982, -79.4358], [43.7005, -79.4182], [43.7028, -79.4085],
+        [43.7042, -79.4012], [43.7061, -79.3987], [43.7082, -79.3888], [43.7105, -79.3775],
+        [43.7128, -79.3652], [43.7152, -79.3528], [43.7188, -79.3382], [43.7212, -79.3288],
+        [43.7235, -79.3182], [43.7258, -79.3085], [43.7275, -79.2982], [43.7288, -79.2882],
+        [43.7298, -79.2782], [43.7305, -79.2682], [43.7312, -79.2582], [43.7318, -79.2482],
+        [43.7323, -79.2637]
+    ],
+    "6": [
+        [43.7652, -79.4912], [43.7635, -79.5028], [43.7618, -79.5135], [43.7602, -79.5228],
+        [43.7585, -79.5322], [43.7568, -79.5428], [43.7552, -79.5535], [43.7535, -79.5642],
+        [43.7518, -79.5748], [43.7502, -79.5852], [43.7485, -79.5958], [43.7442, -79.6008],
+        [43.7388, -79.6035], [43.7335, -79.6048], [43.7288, -79.6062]
     ]
 };
 
@@ -214,7 +229,9 @@ function generateAnticipatedSubways() {
     const SUBWAY_CONFIGS = [
         { routeId: "1", agency: "ttc", type: "subway", durationSecs: 4200, headwaySecs: 210, stations: TRANSIT_CORRIDORS["1"] },
         { routeId: "2", agency: "ttc", type: "subway", durationSecs: 3000, headwaySecs: 240, stations: TRANSIT_CORRIDORS["2"] },
-        { routeId: "4", agency: "ttc", type: "subway", durationSecs: 600,  headwaySecs: 330, stations: TRANSIT_CORRIDORS["4"] }
+        { routeId: "4", agency: "ttc", type: "subway", durationSecs: 600,  headwaySecs: 330, stations: TRANSIT_CORRIDORS["4"] },
+        { routeId: "5", agency: "ttc", type: "subway", durationSecs: 2400, headwaySecs: 300, stations: TRANSIT_CORRIDORS["5"] },
+        { routeId: "6", agency: "ttc", type: "subway", durationSecs: 2100, headwaySecs: 360, stations: TRANSIT_CORRIDORS["6"] }
     ];
 
     SUBWAY_CONFIGS.forEach(cfg => {

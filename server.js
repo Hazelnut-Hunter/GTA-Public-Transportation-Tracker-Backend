@@ -34,11 +34,11 @@ let cache = {
 // Default route color schemes
 const DEFAULT_ROUTE_COLORS = {
     // TTC Subway Lines
-    "1": { color: "D5C82B", textColor: "000000", type: "1", agency: "ttc" }, // Line 1 Yonge-University
-    "2": { color: "00994C", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 2 Bloor-Danforth
+    "1": { color: "FFC72C", textColor: "000000", type: "1", agency: "ttc" }, // Line 1 Yonge-University
+    "2": { color: "008000", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 2 Bloor-Danforth (#008000)
     "4": { color: "B30086", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 4 Sheppard
-    "5": { color: "E65100", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 5 Eglinton LRT
-    "6": { color: "5D4037", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 6 Finch West LRT
+    "5": { color: "ff8000", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 5 Eglinton LRT (#ff8000)
+    "6": { color: "808080", textColor: "FFFFFF", type: "1", agency: "ttc" }, // Line 6 Finch West LRT (#808080)
 
     // GO Transit Train Corridors
     "LW": { color: "00853D", textColor: "FFFFFF", type: "2", agency: "go" },
@@ -81,6 +81,39 @@ function isValidGtaLocation(lat, lng) {
     if (lat < 43.15 || lat > 44.80 || lng < -80.60 || lng > -78.30) return false;
     if (lat < 43.60 && lng > -79.48 && lng < -78.95) return false;
     return true;
+}
+
+function getRouteColor(routeId, rawGtfsColor = "", rawGtfsTextColor = "") {
+    const rId = String(routeId).trim();
+
+    if (DEFAULT_ROUTE_COLORS[rId]) {
+        return {
+            color: `#${DEFAULT_ROUTE_COLORS[rId].color}`,
+            textColor: `#${DEFAULT_ROUTE_COLORS[rId].textColor}`
+        };
+    }
+
+    if (rawGtfsColor && rawGtfsColor !== 'DA291C' && rawGtfsColor !== '#DA291C' && rawGtfsColor !== '#da291c') {
+        const c = rawGtfsColor.startsWith('#') ? rawGtfsColor : `#${rawGtfsColor}`;
+        const tc = rawGtfsTextColor ? (rawGtfsTextColor.startsWith('#') ? rawGtfsTextColor : `#${rawGtfsTextColor}`) : '#FFFFFF';
+        return { color: c, textColor: tc };
+    }
+
+    const num = parseInt(rId.replace(/\D/g, '')) || 0;
+
+    if (num >= 200 && num <= 299) {
+        return { color: '#CB6599', textColor: '#FFFFFF' };
+    }
+
+    if (num >= 900 && num <= 999) {
+        return { color: '#008000', textColor: '#FFFFFF' };
+    }
+
+    if (num >= 300 && num <= 399) {
+        return { color: '#0080C0', textColor: '#FFFFFF' };
+    }
+
+    return { color: '#DA291C', textColor: '#FFFFFF' };
 }
 
 // --- WORKER 1: STATIC DATA ---
@@ -139,23 +172,22 @@ async function updateStaticData() {
                 let routeColor = colorIndex !== -1 && parts[colorIndex] ? parts[colorIndex].replace(/"/g, '').trim() : "";
                 let routeTextColor = textColorIndex !== -1 && parts[textColorIndex] ? parts[textColorIndex].replace(/"/g, '').trim() : "";
 
-                if (!routeColor && DEFAULT_ROUTE_COLORS[routeId]) {
-                    routeColor = DEFAULT_ROUTE_COLORS[routeId].color;
-                    routeTextColor = DEFAULT_ROUTE_COLORS[routeId].textColor;
-                } else if (!routeColor) {
-                    routeColor = routeType === "0" ? "DA291C" : (routeType === "1" ? "FFC72C" : "DA291C");
-                    routeTextColor = "FFFFFF";
-                }
+                const computedColors = getRouteColor(shortName || routeId, routeColor, routeTextColor);
 
-                newRoutes[routeId] = {
+                const routeObj = {
                     id: routeId,
                     shortName: shortName,
                     longName: longName,
                     type: routeType,
                     agency: DEFAULT_ROUTE_COLORS[routeId] ? DEFAULT_ROUTE_COLORS[routeId].agency : "ttc",
-                    color: routeColor.startsWith("#") ? routeColor : `#${routeColor}`,
-                    textColor: routeTextColor.startsWith("#") ? routeTextColor : `#${routeTextColor}`
+                    color: computedColors.color,
+                    textColor: computedColors.textColor
                 };
+
+                newRoutes[routeId] = routeObj;
+                if (shortName && shortName !== routeId) {
+                    newRoutes[shortName] = routeObj;
+                }
             }
         }
 
@@ -353,6 +385,8 @@ async function updateRealtimeData() {
 
                 if (!isValidGtaLocation(vehicleObj.position.latitude, vehicleObj.position.longitude)) return null;
 
+                const routeColors = (cache.routes && cache.routes[routeId]) ? cache.routes[routeId] : getRouteColor(routeId);
+
                 return {
                     id: `TTC-${vehicleId}`,
                     agency: 'ttc',
@@ -365,6 +399,8 @@ async function updateRealtimeData() {
                     speed: vehicleObj.position.speed || 0,
                     occupancyStatus: formatEnum(vehicleObj.occupancyStatus, OCCUPANCY_MAP),
                     currentStatus: formatEnum(vehicleObj.currentStatus, STATUS_MAP),
+                    color: routeColors.color,
+                    textColor: routeColors.textColor,
                     stopId: vehicleObj.stopId || null,
                     timestamp: vehicleObj.timestamp ? Number(vehicleObj.timestamp) : Math.floor(Date.now() / 1000)
                 };
